@@ -41,6 +41,13 @@ src/nerfstudio
 ros2/build
 ros2/install
 ros2/log
+clearpath/setup.bash
+clearpath/robot.srdf
+clearpath/robot.srdf.xacro
+clearpath/robot.urdf.xacro
+clearpath/sensors
+clearpath/platform
+clearpath/manipulators
 !data/README.md
 
 
