@@ -38,6 +38,9 @@ catkin_ws/devel
 install/
 data/*
 src/nerfstudio
+ros2/build
+ros2/install
+ros2/log
 !data/README.md
 
 
