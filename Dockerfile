@@ -85,25 +85,45 @@ RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade
     ros-humble-teleop-twist-joy \
     && rm -rf /var/lib/apt/lists/*
    
-# Python packages specific to VirTR.
+# Original VirTR packages
 # RUN pip install --upgrade pip setuptools
 # RUN pip install "jupyter_client>=5.3.4,<8"
 # RUN pip install --upgrade numpy
 # RUN pip install --ignore-installed scipy pandas matplotlib opencv-python testresources open3d asrl-pylgmath pycollada plotly opencv-python
 # RUN pip install --ignore-installed --upgrade numpy pip pyOpenSSL cryptography
-RUN python3 -m pip install --no-cache-dir \
-    "jupyter_client>=5.3.4,<8" \
-    numpy \
-    pandas \
-    matplotlib \
-    opencv-python \
-    testresources \
-    open3d \
-    asrl-pylgmath \
-    pycollada \
-    plotly \
-    pyOpenSSL \
-    cryptography
+
+# Python packages specific to VirTR.
+# Preinstall some packages to avoid open3d overwriting numpy version
+RUN apt update && apt install -q -y --no-install-recommends --no-upgrade \
+    python3-jupyter-client \
+    python3-numpy \
+    python3-scipy \
+    python3-sklearn \
+    python3-pandas \
+    python3-matplotlib \
+    python3-opencv \
+    python3-testresources \
+    python3-collada \
+    python3-openssl \
+    python3-cryptography \
+    && rm -rf /var/lib/apt/lists/*
+
+    RUN pip install --no-cache-dir open3d asrl-pylgmath 
+
+# RUN python3 -m pip install --no-cache-dir \
+#     "jupyter_client>=5.3.4,<8" \
+#     numpy \
+#     scipy \
+#     pandas \
+#     matplotlib \
+#     opencv-python \
+#     testresources \
+#     open3d \
+#     asrl-pylgmath \
+#     pycollada \
+#     plotly \
+#     pyOpenSSL \
+#     cryptography
 
 # Blender could actually be removed - you can run Gazebo with .obj/.mtl files directly instead of .dae
 RUN python3 -m pip install --no-cache-dir \
@@ -113,5 +133,8 @@ RUN python3 -m pip install --no-cache-dir \
 USER ${USERID}:${GROUPID}
 
 WORKDIR ${VIRTRWS}
+
+# Might require this
+# RUN chmod +x ${VIRTRWS}/src/warthog_gazebo_path_publisher/warthog_gazebo_path_publisher/save_path.py
 
 CMD ["/bin/bash", "-l"]
