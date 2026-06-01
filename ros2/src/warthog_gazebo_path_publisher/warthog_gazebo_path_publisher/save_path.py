@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Record relative Warthog transforms from Gazebo model states to CSV.
-
-ROS 2 port of the original ROS 1 rospy node.
+"""
+Record relative Warthog transforms from Gazebo model poses to CSV.
+Assumes that there is a running Gazebo Ignition simulation and bridge to ROS2.
+Details on bridge can be found in the platform launch file under the clearpath directory.
 """
 
 import csv
@@ -29,8 +30,10 @@ class WarthogRelativeTransformRecorder(Node):
         # self.declare_parameter("parent_frame_id", "parking_world")
         # self.declare_parameter("child_frame_id", "w200_0066/robot")
 
+        virtr = os.environ["VIRTR"]
+
         self.model_name = str(self.get_parameter("model_name").value)
-        self.output_dir = os.path.expanduser(f"data/{self.get_parameter('map').value}/paths")
+        self.output_dir = os.path.expanduser(f"{virtr}/data/{self.get_parameter('map').value}/paths")
         self.output_filename = self.get_parameter("output_filename").value
         self.sampling_interval = float(self.get_parameter("sampling_interval").value)
         self.output_file = os.path.join(self.output_dir, self.output_filename)
@@ -41,10 +44,6 @@ class WarthogRelativeTransformRecorder(Node):
         self.tf_topic = "/" + self.model_name + "/tf"
         self.parent_frame_id = str(self.get_parameter("map").value)
         self.child_frame_id = self.model_name + "/robot"
-
-        self.output_dir = os.path.expanduser(
-            f"data/{self.get_parameter('map').value}/paths"
-        )
 
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -94,15 +93,12 @@ class WarthogRelativeTransformRecorder(Node):
         if self.last_timestamp is not None and (timestamp - self.last_timestamp) < self.sampling_interval:
             return  # Skip processing if the interval has not elapsed
 
-        # Update the last timestamp
-        self.last_timestamp = timestamp
-
         try:
             # Find the transform of the Warthog
             target_tf = self.find_target_transform(msg)
 
             if target_tf is None:
-                self.get_logger().warn(f"Transform from {self.parent_frame_id} to {self.child_frame_id} not found in TFMessage.", throttle_duration_sec=5.0)
+                # self.get_logger().warn(f"Transform from {self.parent_frame_id} to {self.child_frame_id} not found in TFMessage.", throttle_duration_sec=5.0)
                 return
 
             # Convert the pose to a 4x4 transformation matrix
@@ -133,8 +129,13 @@ class WarthogRelativeTransformRecorder(Node):
             # Update the previous pose to the current matrix
             self.previous_pose = current_matrix
 
+            # Update the last timestamp when we get a valid pose
+            self.last_timestamp = timestamp
+
+            return
+
         except ValueError:
-            self.get_logger().warn(f"Failed to find target transform message to {self.child_frame_id}.",throttle_duration_sec=5.0)
+            self.get_logger().warn(f"Transform from {self.parent_frame_id} to {self.child_frame_id} not found in TFMessage.", throttle_duration_sec=5.0)
             return
 
 def main(args=None) -> None:

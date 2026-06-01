@@ -19,7 +19,8 @@ setup(
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
-        'console_scripts': [
+        "console_scripts": [
+            "save_path = warthog_gazebo_path_publisher.save_path:main",
         ],
     },
 )
