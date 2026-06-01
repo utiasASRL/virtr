@@ -153,6 +153,28 @@ Eigen::Matrix4d computeAbsolutePoseByTimestamp(const std::vector<std::pair<Eigen
   return global_pose;
 }
 
+bool parseBoolFlag(const std::string& value) {
+  if (value == "1" || value == "true" || value == "True" || value == "TRUE") {
+    return true;
+  }
+
+  if (value == "0" || value == "false" || value == "False" || value == "FALSE") {
+    return false;
+  }
+
+  throw std::invalid_argument("Invalid flag: " + value + ". Expected one of: 1, 0, true, false.");
+}
+
+std::string requireEnvVar(const std::string& name) {
+  const char* value = std::getenv(name.c_str());
+
+  if (value == nullptr || std::string(value).empty()) {
+    throw std::runtime_error("Required environment variable is not set: " + name);
+  }
+
+  return std::string(value);
+}
+
 int main(int argc, char **argv) {  
 
   if (argc != 5 && argc != 3) {
@@ -246,11 +268,10 @@ int main(int argc, char **argv) {
     vtr::logging::configureLogging(log_filename, enable_debug, enabled_loggers); 
 
     // Load point cloud data
-    // auto cloud = loadPointCloud("/home/desiree/ASRL/vtr3/data/Experiment3/urban/pix4d/ESTIMATEDpc.pcd");
+    auto cloud = loadPointCloud(pointcloud_path);
     std::cout << "Point cloud loaded successfully." << std::endl;
 
     // Read transformation matrices from CSV
-    // std::string odometry_csv_path = "/home/desiree/ASRL/vtr3/data/Experiment3/urban/pix4d/clicked_relative_transforms_2025_08_15_02_14_01_urban_path.csv"; 
     auto matrices_with_timestamps = readTransformMatricesWithTimestamps(odometry_csv_path);
 
     // This transform brings the first pose (absolute) to identity.
@@ -263,7 +284,6 @@ int main(int argc, char **argv) {
     cloud = rebased_cloud; 
 
     // Create and populate pose graph
-    // std::string graph_path =  "/home/desiree/ASRL/vtr3/temp/Experiment3/virtual_urban/pix4d/clicked_graph"; 
     auto graph = createPoseGraph(matrices_with_timestamps, graph_path);
 
     // Reload the saved graph

@@ -4,12 +4,55 @@
 #include <memory>
 #include <vtr_pose_graph/serializable/rc_graph.hpp>
 
+std::string requireEnvVar(const std::string& name) {
+  const char* value = std::getenv(name.c_str());
+
+  if (value == nullptr || std::string(value).empty()) {
+    throw std::runtime_error("Required environment variable is not set: " + name);
+  }
+
+  return std::string(value);
+}
+
 int main(int argc, char** argv) {
+
+  if (argc != 2 && argc != 3) {
+    std::cerr << "Usage:\n"
+              << "  " << argv[0] << " <map_name>\n"
+              << "  OR\n"
+              << "  " << argv[0] << " <graph_folder> <output_csv_path>\n";
+    return -1;
+  }
+
+  std::string graph_folder;
+  std::string output_csv_path;
+
+  if (argc == 3) {
+    graph_folder = argv[1];
+    output_csv_path = argv[2];
+  } else {
+    const std::string map_name = argv[1];
+
+    const std::string virtr_root = requireEnvVar("VIRTR");
+    const std::string data_folder = virtr_root + "/data/" + map_name;
+
+    graph_folder = data_folder + "/graph";
+    output_csv_path = data_folder + "/paths/robot_path.csv";
+
+    if (!std::filesystem::exists(graph_folder)) {
+      throw std::runtime_error(
+          "Missing expected graph folder: " + graph_folder +
+          "\nPlease rename/move your graph folder to graph, or use explicit-path mode.");
+    }
+
+    std::filesystem::create_directories(data_folder + "/paths");
+  }
+
+  LOG(INFO) << "Graph folder: " << graph_folder;
+  LOG(INFO) << "Output CSV path: " << output_csv_path;
+
   vtr::logging::configureLogging();  // Initialize logging
-  (void)argc;
-  (void)argv;
-  // Path to your graph folder
-  std::string graph_folder = "data/Experiment2/lidar/dome_teach/graph"; 
+
   // Load the pose graph
   using Graph = vtr::pose_graph::RCGraph;
   std::shared_ptr<Graph> graph;
@@ -21,12 +64,12 @@ int main(int argc, char** argv) {
     return -1;
   }
   // Open a CSV file to save the path
-  std::ofstream csv_file("robot_path.csv");
+  std::ofstream csv_file(output_csv_path);
   if (!csv_file.is_open()) {
     LOG(ERROR) << "Error: Could not open output file!";
     return -1;
   }
-  LOG(INFO) << "Opened robot_path.csv for writing.";
+  LOG(INFO) << "Opened " << output_csv_path << " for writing.";
   // Write the CSV header
   csv_file << "x,y,z\n";
   // Iterate through the vertices in the graph
