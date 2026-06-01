@@ -27,6 +27,10 @@ ENV VIRTR=${VTRROOT}/virtr
 ENV VIRTRWS=${VIRTR}/ros2
 ENV CLEARPATHCONFIG=${VIRTR}/clearpath
 
+# Setting Gazebo resource paths to use local data/
+ENV IGN_GAZEBO_RESOURCE_PATH=${VIRTR}/data
+ENV GZ_SIM_RESOURCE_PATH=${VIRTR}/data
+
 RUN echo "alias source_virtr='source /opt/ros/humble/setup.bash; source ${VTRSRC}/main/install/setup.bash; source ${VIRTRWS}/install/setup.bash'" >> ${HOMEDIR}/.bashrc
 RUN echo "alias build_virtr='source /opt/ros/humble/setup.bash && cd ${VTRSRC}/main && colcon build --symlink-install && source ${VTRSRC}/main/install/setup.bash && cd ${VIRTRWS} && colcon build --symlink-install'" >> ${HOMEDIR}/.bashrc
 
@@ -57,18 +61,29 @@ RUN curl -fsSL https://packages.clearpathrobotics.com/public.key \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/clearpath-archive-keyring.gpg] https://packages.clearpathrobotics.com/stable/ubuntu $(lsb_release -cs) main" \
       > /etc/apt/sources.list.d/clearpath-latest.list
 
-# Install ROS 2 Humble / Gazebo / Clearpath simulation dependencies.
+# Install Clearpath simulation dependencies.
 RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade \
     ros-humble-clearpath-common \
     ros-humble-clearpath-msgs \
     ros-humble-clearpath-config \
     ros-humble-clearpath-viz \
-    ros-humble-ign-ros2-control \
+    && rm -rf /var/lib/apt/lists/*
+# ros-humble-clearpath-desktop
+
+# Install Gazebo Fortress ROS2 dependencies (These could maybe be removed).
+RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade \
     ros-humble-ros-gz \
+    ros-humble-ign-ros2-control \
+    && rm -rf /var/lib/apt/lists/*
+# ros-humble-ros-gz-bridge
+# python3-gz-transport13 \
+# python3-gz-msgs10 \
+
+# Install other ROS2 dependencies
+RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade \
     ros-humble-teleop-twist-keyboard \
     ros-humble-teleop-twist-joy \
     && rm -rf /var/lib/apt/lists/*
-# ros-humble-clearpath-desktop
    
 # Python packages specific to VirTR.
 # RUN pip install --upgrade pip setuptools
@@ -90,6 +105,11 @@ RUN python3 -m pip install --no-cache-dir \
     pyOpenSSL \
     cryptography
 
+# Blender could actually be removed - you can run Gazebo with .obj/.mtl files directly instead of .dae
+RUN python3 -m pip install --no-cache-dir \
+    --extra-index-url https://download.blender.org/pypi/ \
+    "bpy==4.0.0"
+    
 USER ${USERID}:${GROUPID}
 
 WORKDIR ${VIRTRWS}
