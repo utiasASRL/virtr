@@ -1,0 +1,551 @@
+#include <array>
+#include <cmath>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <vector>
+#include <limits>
+#include <random>
+#include <matplotlibcpp.h>
+#include <pcl/common/transforms.h>
+#include <Eigen/Dense>
+#include <pcl/filters/crop_box.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/io/ply_io.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <vtr_logging/logging_init.hpp>
+#include <vtr_tactic/modules/memory/graph_mem_manager_module.hpp>
+#include <vtr_pose_graph/path/pose_cache.hpp>
+#include <vtr_pose_graph/serializable/rc_graph.hpp>
+#include <vtr_pose_graph/id/id.hpp>
+#include <vtr_pose_graph/serializable/rc_edge.hpp>
+#include <vtr_pose_graph/serializable/bubble_interface.hpp>
+#include <vtr_pose_graph/serializable/rc_vertex.hpp>
+#include <vtr_pose_graph/index/edge_base.hpp>
+#include <vtr_pose_graph/index/vertex_base.hpp>
+#include <vtr_pose_graph/index/graph_base.hpp>
+#include <vtr_lidar/pipeline.hpp>
+#include <vtr_lidar/data_types/pointmap.hpp>
+#include <vtr_lidar/data_types/pointmap_pointer.hpp>
+#include <vtr_lidar/modules/pointmap/intra_exp_merging_module_v2.hpp>
+#include <vtr_lidar/data_types/point.hpp>
+#include <vtr_storage/stream/message.hpp>
+#include <vtr_tactic/modules/factory.hpp>
+#include <vtr_tactic/modules/memory/graph_mem_manager_module.hpp>
+#include <vtr_radar_lidar/modules/localization/localization_icp_module.hpp>
+
+// Use necessary namespaces
+namespace plt = matplotlibcpp;
+using namespace vtr::logging;
+using namespace vtr::pose_graph;
+using namespace vtr::storage;
+using namespace vtr::tactic;
+using namespace vtr::lidar;
+using namespace vtr::radar_lidar;
+
+pcl::PointCloud<pcl::PointNormal>::Ptr loadPointCloud(const std::string& filename) {
+  auto cloud = std::make_shared<pcl::PointCloud<pcl::PointNormal>>();
+  if (pcl::io::loadPCDFile<pcl::PointNormal>(filename, *cloud) == -1) {
+    throw std::runtime_error("Failed to load PCD file: " + filename);
+  }
+  return cloud;
+}
+
+std::vector<std::pair<Eigen::Matrix4d, Timestamp>> readTransformMatricesWithTimestamps(const std::string& filename) {
+  std::vector<std::pair<Eigen::Matrix4d, Timestamp>> data;
+  std::ifstream file(filename);
+  if (!file.is_open()) 
+    throw std::runtime_error("Could not open file: " + filename);
+
+  // Skip header line
+  std::string line;
+  std::getline(file, line);
+
+  // Read and parse each line
+  while (std::getline(file, line)) {
+    std::stringstream ss(line);
+    std::string value;
+
+    // Parse the timestamp (first column contains it)
+    std::getline(ss, value, ',');
+    double fractional_timestamp = std::stod(value);  // Retain fractional seconds
+    Timestamp timestamp = static_cast<int64_t>(fractional_timestamp * 1e9);  // Convert to nanoseconds
+    
+    // Parse 4x4 transformation matrix
+    Eigen::Matrix4d transform = Eigen::Matrix4d::Identity();
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < 4; j++) {
+        std::getline(ss, value, ',');
+        transform(i, j) = std::stod(value);
+      }
+    }
+    data.emplace_back(transform, timestamp);
+  }
+  return data;
+}
+
+std::shared_ptr<RCGraph> createPoseGraph(const std::vector<std::pair<Eigen::Matrix4d, Timestamp>>& data, const std::string& graph_path) {
+  // Initialize pose graph
+  auto graph = std::make_shared<RCGraph>(graph_path, false);
+  graph->addRun();
+  vtr::pose_graph::RCGraph::MapInfoMsg map_info_msg;
+  
+  map_info_msg.lat = 43.7822;
+  map_info_msg.lng = -79.4661;
+  map_info_msg.theta = 1.3;
+  map_info_msg.scale = 1.0;
+  map_info_msg.set= true;
+
+  graph->setMapInfo(map_info_msg);
+
+  if (data.empty()) {
+    throw std::runtime_error("No data provided to create the pose graph.");
+  }
+  
+  const auto& [initial_transform, initial_timestamp] = data.front();  
+  graph->addVertex(initial_timestamp); //dont need to assign a transform, this is the origin
+
+  for (size_t i = 1; i < data.size(); ++i) {   // Add vertices and edges for each transformation and timestamp
+    const auto& [transform, timestamp] = data[i];
+    RCVertex::Ptr new_vertex = graph->addVertex(timestamp);    
+    EdgeTransform edge_transform(transform);
+    edge_transform.setZeroCovariance();
+    graph->addEdge(new_vertex->id() - 1, new_vertex->id(), EdgeType::Temporal, true, edge_transform);
+    }
+
+  // Save the graph
+  graph->save();
+
+  return graph;
+}
+
+Eigen::Matrix4d computeAbsolutePoseByTimestamp(const std::vector<std::pair<Eigen::Matrix4d, Timestamp>>& transforms_with_timestamps, Timestamp vertex_time) {
+  if (transforms_with_timestamps.empty()) {
+    throw std::runtime_error("No transformation data available.");
+  }
+
+  // Initialize global_pose with the first transformation
+  Eigen::Matrix4d global_pose = Eigen::Matrix4d::Identity();
+
+  std::vector<double> x_coords;
+  std::vector<double> y_coords;
+  std::vector<double> z_coords;
+
+  for (size_t i = 1; i < transforms_with_timestamps.size(); i++) {
+    const auto& [transform, timestamp] = transforms_with_timestamps[i];
+    if (timestamp <= vertex_time) {     // Accumulate transforms up to and including the vertex timestamp
+      global_pose = transform * global_pose; 
+      x_coords.push_back(global_pose(0, 3)); 
+      y_coords.push_back(global_pose(1, 3));
+      z_coords.push_back(global_pose(2, 3));
+      if (timestamp == vertex_time) {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+  return global_pose;
+}
+
+int main(int argc, char **argv) {  
+
+  if (argc != 5 && argc != 3) {
+    std::cerr << "Usage:\n"
+              << "  " << argv[0]
+              << " <point_cloud_pcd_path> <transforms_csv_path> <graph_path> <use_radar>\n"
+              << "  OR\n"
+              << "  " << argv[0]
+              << " <map_name> <use_radar>\n"
+              << "\nExamples:\n"
+              << "  " << argv[0]
+              << " /path/to/map/pointcloud.pcd /path/to/transforms/relative_transforms.csv /path/to/graph false\n"
+              << "  " << argv[0]
+              << " urban true\n";
+    return -1;
+  }
+
+  std::string pointcloud_path;
+  std::string odometry_csv_path;
+  std::string graph_path;
+  bool use_radar = false;
+
+  if (argc == 5) {
+    pointcloud_path = argv[1];
+    odometry_csv_path = argv[2];
+    graph_path = argv[3];
+    use_radar = parseBoolFlag(argv[4]);
+
+  } else {
+    const std::string map_name = argv[1];
+    use_radar = parseBoolFlag(argv[2]);
+
+    const std::string virtr_root = requireEnvVar("VIRTR");
+    const std::string data_folder = virtr_root + "/data/" + map_name;
+
+    pointcloud_path = data_folder + "/pointcloud.pcd";
+    odometry_csv_path = data_folder + "/paths/relative_transforms.csv";
+    graph_path = data_folder + "/graph";
+
+  }
+
+  if (!std::filesystem::exists(pointcloud_path)) {
+    throw std::runtime_error(
+        "Missing expected point cloud file: " + pointcloud_path +
+        "\nPlease rename your .pcd file to pointcloud.pcd or use explicit-path mode.");
+  }
+
+  if (!std::filesystem::exists(odometry_csv_path)) {
+    throw std::runtime_error(
+        "Missing expected transforms CSV: " + odometry_csv_path +
+        "\nPlease rename your CSV to relative_transforms.csv inside the paths folder, "
+        "or use explicit-path mode.");
+  }
+  
+  std::cout << "Point cloud path: " << pointcloud_path << std::endl;
+  std::cout << "Odometry CSV path: " << odometry_csv_path << std::endl;
+  std::cout << "Graph path: " << graph_path << std::endl;
+  std::cout << "Using radar: " << std::boolalpha << use_radar << std::endl;
+
+  try {
+    // Redirect std::cout to a log file
+    std::ofstream log_file("output_log.txt");
+    std::streambuf* cout_buf = std::cout.rdbuf();
+    std::cout.rdbuf(log_file.rdbuf());
+
+    constexpr bool use_radar = false;  // set true for radar cropping, false for lidar
+
+    // Initialize ROS2 node
+    rclcpp::init(argc, argv);  
+    auto node = std::make_shared<rclcpp::Node>("lidar_pipeline_node");
+
+    auto config_ = vtr::lidar::LidarPipeline::Config::fromROS(node, "lidar_pipeline");
+
+    std::vector<double> Tsr_flat = node->declare_parameter<std::vector<double>>(
+        "radar_localization.T_s_r", // _desitination_source (Tim's Convention) ie ps = Tsr*pr (have pr want ps), Tab brings point in b frame to a frame
+        {  // robot (base_link) to sensor (navtech_base)  mount transform from TF log - verified correct by desi and hunter with matlab July 9th
+          1.0,  0.0,            0.0,           -0.025,
+          0.0, -1.0,   -1.22465e-16,           -0.002,
+          0.0,  1.22465e-16,   -1.0,            1.5,
+          0.0,  0.0,            0.0,             1.0
+        });
+    Eigen::Matrix4d T_s_r;
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 4; ++j)
+        T_s_r(i,j) = Tsr_flat[4*i + j];
+
+    // Configure logging
+    std::string log_filename = "example_log.txt";
+    bool enable_debug = true;
+    std::vector<std::string> enabled_loggers = {"test"}; //removed "pose_graph"
+    vtr::logging::configureLogging(log_filename, enable_debug, enabled_loggers); 
+
+    // Load point cloud data
+    // auto cloud = loadPointCloud("/home/desiree/ASRL/vtr3/data/Experiment3/urban/pix4d/ESTIMATEDpc.pcd");
+    std::cout << "Point cloud loaded successfully." << std::endl;
+
+    // Read transformation matrices from CSV
+    // std::string odometry_csv_path = "/home/desiree/ASRL/vtr3/data/Experiment3/urban/pix4d/clicked_relative_transforms_2025_08_15_02_14_01_urban_path.csv"; 
+    auto matrices_with_timestamps = readTransformMatricesWithTimestamps(odometry_csv_path);
+
+    // This transform brings the first pose (absolute) to identity.
+    Eigen::Matrix4d origin_transform = matrices_with_timestamps.front().first;
+    Eigen::Matrix4d rebase_transform = origin_transform.inverse();
+
+    // Rebase the point cloud: transform it using the rebase_transform.
+    pcl::PointCloud<pcl::PointNormal>::Ptr rebased_cloud = std::make_shared<pcl::PointCloud<pcl::PointNormal>>();
+    pcl::transformPointCloudWithNormals(*cloud, *rebased_cloud, rebase_transform);
+    cloud = rebased_cloud; 
+
+    // Create and populate pose graph
+    // std::string graph_path =  "/home/desiree/ASRL/vtr3/temp/Experiment3/virtual_urban/pix4d/clicked_graph"; 
+    auto graph = createPoseGraph(matrices_with_timestamps, graph_path);
+
+    // Reload the saved graph
+    auto loaded_graph = RCGraph::MakeShared(graph_path, true);
+
+    vtr::pose_graph::VertexId last_submap_vertex_id = vtr::pose_graph::VertexId::Invalid();
+    Eigen::Matrix4d last_submap_pose = Eigen::Matrix4d::Identity();  // Initialize with identity
+
+    // Parameters for the cylindrical filter
+    float cylinder_radius = 30.0;  //changed to 50 and 15 for grassy testing with nerf in feb - was 30 for paper
+    float lidar_cylinder_height = 20.0; //lidar_cylinder_height = 30.0;   
+    float radar_cylinder_height = 0.1; //0.2
+    float cylinder_height = use_radar ? radar_cylinder_height : lidar_cylinder_height; 
+    float voxel_size = use_radar ? 4.0f : 0.9f; // Set voxel size based on sensor type - lower number = more dense - for paper used 0.9 for all lidar nerf maps - current radar tests use 1.0
+    
+    // Iterate through all vertices in the graph 
+    for (auto it = loaded_graph->begin(0ul); it != loaded_graph->end(); ++it) {
+      auto vertex = *it;  // Dereference iterator to access vertex
+      auto vertex_id = vertex.v()->id();
+      auto vertex_time = vertex.v()->vertexTime();
+      std::cout << "Vertex ID: " << vertex_id
+                << ", Timestamp (nanoseconds): " << vertex_time << std::endl;
+   
+      using EnvInfoLM = vtr::storage::LockableMessage<EnvInfo>;
+      const auto env_info_data = std::make_shared<EnvInfo>();
+      const auto env_info_msg = std::make_shared<EnvInfoLM>(env_info_data, vertex_time);
+      vertex.v()->insert<EnvInfo>("env_info", "vtr_tactic_msgs/msg/EnvInfo", env_info_msg);
+
+      using WaypointNameLM = vtr::storage::LockableMessage<WaypointName>;
+      const auto waypoint_name_data = std::make_shared<WaypointName>();
+      const auto waypoint_name_msg = std::make_shared<WaypointNameLM>(waypoint_name_data, vertex_time);
+      vertex.v()->insert<WaypointName>("waypoint_name", "vtr_tactic_msgs/msg/WaypointNames", waypoint_name_msg);
+
+      // Compute the current absolute pose for this vertex
+      Eigen::Matrix4d current_pose = computeAbsolutePoseByTimestamp(matrices_with_timestamps, vertex_time);
+   
+      bool createNewSubmap = false;
+
+      // No submap has been created yet - create one.
+      if (!last_submap_vertex_id.isValid()) {
+          createNewSubmap = true;
+      } else {
+          // Compute transformation from current robot position to last submap vertex
+          const auto T_sv_r = last_submap_pose * current_pose.inverse(); 
+       
+          // Extract translation component (3D distance)
+          Eigen::Vector3d translation = T_sv_r.block<3,1>(0,3);  
+          double dtran = translation.norm();  // Euclidean distance traveled
+       
+          // Extract rotation component (Euler angles in radians convert to degrees)
+          Eigen::Vector3d rotation_vec = T_sv_r.block<3,3>(0,0).eulerAngles(0, 1, 2);  
+          double drot = rotation_vec.norm() * (180.0 / M_PI);  
+          std::cout << "Distance from last submap: " << dtran << " m" << std::endl;
+          std::cout << "Rotation from last submap: " << drot << " degrees" << std::endl;
+          // Apply the same thresholds as VTR3
+          if (dtran > 1.5 || drot > 30) { //when replaced with config_ references, every vertex gets a submap (tested on lidar odom w nerf cloud)... not sure why cuz its the same odometry as the existing teach graph where not every vertex has a submap
+              createNewSubmap = true;
+          }
+      }
+      if (createNewSubmap) {
+        std::cout << "Creating new submap at vertex " << vertex_id << std::endl;
+        
+        // Compute the absolute pose using vertex timestamp
+        Eigen::Matrix4d absolute_pose = computeAbsolutePoseByTimestamp(
+            matrices_with_timestamps, vertex_time);
+        std::cout << "Transformation Matrix:\n" << absolute_pose << std::endl;
+       
+        if (cloud->empty()) {
+            throw std::runtime_error("Input point cloud is empty!");
+        }
+        // Transform the point cloud to align with the vertex's pose and convert to PointWithInfo
+        pcl::PointCloud<PointWithInfo>::Ptr converted_cloud(new pcl::PointCloud<PointWithInfo>());
+        pcl::copyPointCloud(*cloud, *converted_cloud);
+        pcl::PointCloud<PointWithInfo>::Ptr transformed_cloud(new pcl::PointCloud<PointWithInfo>());
+        pcl::transformPointCloudWithNormals(*converted_cloud, *transformed_cloud, absolute_pose);
+        pcl::PointCloud<PointWithInfo>::Ptr cropped_cloud(new pcl::PointCloud<PointWithInfo>());
+        
+        // RADAR:
+        if (use_radar) {      
+          constexpr float kRadarMaxRange  = 20.0f;                       // metres // current best is 40
+          constexpr float kRadarConeDeg   = 2.0f;                        // half-angle 
+          constexpr float kConeTan        = std::tan(kRadarConeDeg * M_PI / 180.0); 
+          constexpr float kAzRes           = 0.015707963267948967f;      // approx 0.9 rad // current best is *2 (TRY *1, *0.5, *1.5)
+          constexpr float kShadowMargin    = 0.1f;                      // keep pts within +30 cm // current best is 0.30 (TRY 0.20, 0.10)
+          const     int   kNumBins         = static_cast<int>(
+                                              std::ceil(2.0f * M_PI / kAzRes));
+
+          constexpr int   kSideBins       = 3;      // look +/-2 bins  (approx 2 × kAzRes  wide) // current best is 2
+          constexpr float kSideMargin     = 0.07f;  // keep pts within +7 cm of any neighbour min-range // current best is 0.07
+
+          // Assemble the full sensor to map transform:
+          Eigen::Matrix4d T_r_v = Eigen::Matrix4d::Identity();           // vertex to robot
+          Eigen::Matrix4d T_v_m = current_pose;                          // map to vertex
+     
+          // Split into rotation + translation
+          Eigen::Matrix4f T_s_r_temp = T_s_r.cast<float>();              // robot to sensor
+          Eigen::Matrix3f C_s_r = T_s_r_temp.block<3,3>(0,0);            // rotation
+          Eigen::Vector3f t_s_r = T_s_r_temp.block<3,1>(0,3);            // translation (1.032 m mast height)
+
+          // First pass – compute the minimum range observed in each azimuth bin
+          std::vector<float> min_range(kNumBins,
+                                      std::numeric_limits<float>::max());
+
+          for (std::size_t i = 0; i < transformed_cloud->size(); ++i) {
+            const auto& pt = transformed_cloud->points[i];
+
+            Eigen::Vector3f p_s = C_s_r * Eigen::Vector3f(pt.x, pt.y, pt.z) + t_s_r;
+
+            float r_xy = std::hypot(p_s.x(), p_s.y());
+            if (r_xy > kRadarMaxRange)                     continue;           // out of range
+            if (std::abs(p_s.z()) > r_xy * kConeTan)       continue;           // outside cone
+
+            float az = std::atan2(p_s.y(), p_s.x());                           // –pi‥pi
+            int   bin = static_cast<int>((az + static_cast<float>(M_PI)) / kAzRes);
+            bin = std::min(std::max(bin, 0), kNumBins - 1);                    // clamp
+
+            if (r_xy < min_range[bin])        min_range[bin] = r_xy;           // update
+          }
+
+          // Second pass – keep only points that are very close to the first return
+          std::vector<int> keep_indices;
+          keep_indices.reserve(transformed_cloud->size());
+
+          for (std::size_t i = 0; i < transformed_cloud->size(); ++i) {
+            const auto& pt = transformed_cloud->points[i];
+
+            Eigen::Vector3f p_s = C_s_r * Eigen::Vector3f(pt.x, pt.y, pt.z) + t_s_r;
+            float r_xy = std::hypot(p_s.x(), p_s.y());
+            if (r_xy > kRadarMaxRange)                     continue;
+            if (std::abs(p_s.z()) > r_xy * kConeTan)       continue;
+
+            float az  = std::atan2(p_s.y(), p_s.x());
+            int   bin = static_cast<int>((az + static_cast<float>(M_PI)) / kAzRes);
+            bin = std::min(std::max(bin, 0), kNumBins - 1);
+
+            if (r_xy <= min_range[bin] + kShadowMargin)    keep_indices.push_back(i);
+          }
+
+          // Build jittered + streaked cloud
+          constexpr float kSigmaR   = 0.044f;        // 4 cm range noise // current best is 0.04
+          constexpr float kSigmaTh  = 0.001f;       // 1 mrad azimuth noise // current best is 0.001
+          constexpr int   kLmean    = 2; //5           // mean streak length (bins) // current best is 2
+
+          std::mt19937                     rng{static_cast<uint32_t>(vertex_time)};
+          std::normal_distribution<float>  n_r (0.0f, kSigmaR);
+          std::normal_distribution<float>  n_th(0.0f, kSigmaTh);
+          std::uniform_real_distribution<float>  uni(0.0f, 1.0f);
+
+          cropped_cloud->clear();
+          cropped_cloud->reserve(static_cast<std::size_t>(keep_indices.size() * 1.5));   // rough guess
+
+          for (const int idx : keep_indices) {
+            const auto& pt = transformed_cloud->points[idx];
+
+            // map/vertex frame to sensor frame
+            Eigen::Vector3f p_s = C_s_r * Eigen::Vector3f(pt.x, pt.y, pt.z) + t_s_r;
+            float z_s           = p_s.z();                                 // retain height until flatten
+
+            // polar decomp
+            float r   = std::hypot(p_s.x(), p_s.y());
+            float th  = std::atan2(p_s.y(), p_s.x());
+
+            // base hit with Gaussian jitter
+            float r_j  = std::max(0.01f, r  + n_r(rng));                   // keep r > 0
+            float th_j = th + n_th(rng);
+
+            auto make_point = [&](float r_p, float th_p) {
+              Eigen::Vector3f ps_new(r_p * std::cos(th_p),
+                                    r_p * std::sin(th_p),
+                                    z_s);                                 // still sensor frame
+              // sensor to vertex/map
+              Eigen::Vector3f pv_new = C_s_r.transpose() * (ps_new - t_s_r);
+
+              PointWithInfo q;
+              q.x = pv_new.x();
+              q.y = pv_new.y();
+              q.z = 1.0f;              // flatten to radar plane
+              q.normal_score = 1.0f;
+              cropped_cloud->push_back(q);
+            };
+
+            make_point(r_j, th_j);
+
+            // forward echo streak (geometric decay)
+            float keep_prob = std::exp(-1.0f / static_cast<float>(kLmean));
+            int   echo_cnt  = 0;
+            float th_step   = kAzRes;          // forward direction of rotation
+
+            float r_echo = r_j;
+            float th_echo = th_j;
+
+            while (uni(rng) < keep_prob) {
+              ++echo_cnt;
+              th_echo += th_step;
+              r_echo  += n_r(rng);             // small extra range jitter
+
+              // wrap az to [-pi,pi] so binning stays sane later if needed
+              if (th_echo >  M_PI) th_echo -= 2.0f * M_PI;
+
+              make_point(r_echo, th_echo);
+              keep_prob *= std::exp(-1.0f / static_cast<float>(kLmean));  // geometric decay
+            }
+          }
+
+        } else {
+          // LiDAR: 
+          for (auto& point : *transformed_cloud) {
+            const float x = point.x, y = point.y, z = point.z;
+            const float distance_xy = std::sqrt(x*x + y*y);
+            float lower_bound = -cylinder_height / 4.0;
+            float upper_bound =  3 * cylinder_height / 4.0;
+            if ((distance_xy <= cylinder_radius) && (z >= lower_bound) && (z <= upper_bound)) {
+              point.normal_score = 1; 
+              cropped_cloud->push_back(point);
+            }
+          }
+        }
+        //debugging
+        std::cout << "Original cloud size: " << cloud->size() << std::endl;
+        std::cout << "Transformed cloud size: " << transformed_cloud->size() << std::endl;
+        std::cout << "Cropped cloud size: " << cropped_cloud->size() << std::endl;
+     
+        // Create a submap and update it with the transformed point cloud
+        auto submap_odo = std::make_shared<PointMap<PointWithInfo>>(voxel_size); 
+        submap_odo->update(*cropped_cloud); 
+   
+        using PointMapLM = vtr::storage::LockableMessage<PointMap<PointWithInfo>>;
+        auto submap_msg = std::make_shared<PointMapLM>(submap_odo, vertex_time);
+   
+        if (use_radar) {
+          vertex.v()->insert<PointMap<PointWithInfo>>(
+              "pointmap", "vtr_radar_msgs/msg/PointMap", submap_msg);
+        } else {
+          vertex.v()->insert<PointMap<PointWithInfo>>(
+              "pointmap", "vtr_lidar_msgs/msg/PointMap", submap_msg);
+        }
+   
+        std::cout << "Point cloud associated with vertex " << vertex_id << "." << std::endl;
+   
+        last_submap_vertex_id = vertex_id;
+        last_submap_pose      = current_pose;
+      }
+      std::cout << "Using previous submap for vertex " << vertex_id << std::endl;
+   
+      // Compute the relative transform from the last submap to the current pose.
+      Eigen::Matrix4d relative_transform = current_pose * last_submap_pose.inverse();
+   
+      auto submap_ptr = std::make_shared<PointMapPointer>();
+      submap_ptr->this_vid = vertex_id; 
+      submap_ptr->map_vid = last_submap_vertex_id;
+      submap_ptr->T_v_this_map = EdgeTransform(relative_transform);
+      submap_ptr->T_v_this_map.setZeroCovariance();
+   
+      using PointMapPointerLM = vtr::storage::LockableMessage<PointMapPointer>;
+      auto submap_ptr_msg = std::make_shared<PointMapPointerLM>(submap_ptr, vertex_time);
+      if (use_radar) {
+          vertex.v()->insert<PointMapPointer>(
+          "pointmap_ptr", "vtr_radar_msgs/msg/PointMapPointer", submap_ptr_msg);
+      } else {
+          vertex.v()->insert<PointMapPointer>(
+          "pointmap_ptr", "vtr_lidar_msgs/msg/PointMapPointer", submap_ptr_msg);
+      }
+   
+      std::cout << "Submap pointer saved for vertex " << vertex_id << "." << std::endl;
+   
+    }
+    loaded_graph->save();
+
+    rclcpp::shutdown();
+    
+    // Restore std::cout to its original state before exiting
+    std::cout.rdbuf(cout_buf);
+    return 0;
+
+  } catch (const std::exception &e) {
+    std::cerr << "Error: " << e.what() << "\n";
+    return -1;
+  }
+}
+
+
+
+
+
+
