@@ -13,7 +13,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='hunter',
+    maintainer='elliot',
     maintainer_email='elliot.prestonkrebs@mail.utoronto.ca',
     description='TODO: Package description',
     license='TODO: License declaration',

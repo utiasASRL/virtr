@@ -108,7 +108,7 @@ RUN apt update && apt install -q -y --no-install-recommends --no-upgrade \
     python3-cryptography \
     && rm -rf /var/lib/apt/lists/*
 
-    RUN pip install --no-cache-dir open3d asrl-pylgmath 
+RUN pip install --no-cache-dir open3d asrl-pylgmath 
 
 # RUN python3 -m pip install --no-cache-dir \
 #     "jupyter_client>=5.3.4,<8" \
