@@ -7,12 +7,14 @@ Details on bridge can be found in the platform launch file under the clearpath d
 
 import csv
 import os
+from pathlib import Path
 import time
 from typing import Optional
 
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from scipy.spatial.transform import Rotation as R
 from tf2_msgs.msg import TFMessage
 
@@ -22,7 +24,16 @@ class WarthogRelativeTransformRecorder(Node):
     def __init__(self) -> None:
         super().__init__("warthog_relative_transform_recorder")
 
-        self.declare_parameter("map", "parking")
+        self.declare_parameter("map", Parameter.Type.STRING)
+        map_param = self.get_parameter("map")
+
+        # Check map directory exists
+        if map_param is None or map_param.value == "":
+            raise RuntimeError("Required parameter 'map' must be set to a non-empty string")
+        virtr = os.environ["VIRTR"]
+        map_path = Path(virtr) / "data" / map_param.value
+        assert map_path.exists(), f"Map path does not exist: {map_path}"
+
         self.declare_parameter("output_filename", "relative_transforms.csv")
         self.declare_parameter("model_name", "w200_0066")
         self.declare_parameter("sampling_interval", 0.2)
@@ -30,7 +41,6 @@ class WarthogRelativeTransformRecorder(Node):
         # self.declare_parameter("parent_frame_id", "parking_world")
         # self.declare_parameter("child_frame_id", "w200_0066/robot")
 
-        virtr = os.environ["VIRTR"]
 
         self.model_name = str(self.get_parameter("model_name").value)
         self.output_dir = os.path.expanduser(f"{virtr}/data/{self.get_parameter('map').value}/paths")
