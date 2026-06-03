@@ -31,8 +31,14 @@ git submodule update --init --remote
 This package contains the vtr_virtualteach C++ package for VTR3 and the custom scripts required to create virtual teach maps. Download it to your local filesystem in ${VTRROOT}.
 
 ```Bash
+export VIRTR=${VTRROOT}/virtr
+export VIRTRWS=${VIRTR}/ros2
+export CLEARPATHCONFIG=${VIRTR}/clearpath
+```
+
+```Bash
 cd ${VTRROOT}
-git clone git@github.com:desifisker/virtual_teach_vtr_wrapper.git
+git clone --recurse-submodules -b ros2_port git@github.com:utiasASRL/virtr.git ${VIRTR}
 ```
 
 ## Download vtr3_posegraph_tools
@@ -119,10 +125,10 @@ source ${VTRSRC}/main/install/setup.bash
 source /opt/ros/humble/setup.bash
 echo $ROS_DISTRO
 
-cd ${VTRROOT}/virtual_teach_vtr_wrapper/
+cd ${VTRROOT}/virtr/
 colcon build --packages-select vtr_virtualteach
 
-source ~/ASRL/vtr3/virtual_teach_vtr_wrapper/install/setup.bash
+source ~/ASRL/vtr3/virtr/install/setup.bash
 
 exit
 ```
@@ -157,6 +163,8 @@ docker run -it --name virtr \
   -v ${VTRROOT}/virtual_teach_vtr_wrapper/catkin_ws:${VTRROOT}/virtual_teach_vtr_wrapper/catkin_ws:rw \
   -v ${VTRROOT}/virtual_teach_vtr_wrapper/src/nerfstudio:${VTRROOT}/virtual_teach_vtr_wrapper/src/nerfstudio:rw \
   virtr
+colcon build --symlink-install
+
 ```
 
 wait until it finishes (takes around 30 min to build and 20 min to finish the entrypoint.sh upon run time).
@@ -199,6 +207,67 @@ chmod +x ImageExtraction.sh ImageProcessor.sh Gazebo.sh TeachMap.sh
 
 # makes: virtual teach map (graph folder used to run with Lidar Teach and Repeat)
 
+```
+
+
+## EPK UPDATES
+Working updates for new docker file. Note the "__NV_PRIME_RENDER_OFFLOAD" and "__GLX_VENDOR_LIBRARY_NAME" in the run command are specifc to if you experience black textures in the Gazebo mesh and if you have two GPU's on your machine (Intel onboard + Nvidia for example).
+```Bash
+cd ${VIRTR}
+docker build -t virtr \
+  --build-arg USERID=$(id -u) \
+  --build-arg GROUPID=$(id -g) \
+  --build-arg USERNAME=$(whoami) \
+  --build-arg HOMEDIR=${HOME} .
+
+docker run -it --name virtr \
+  --privileged \
+  --network=host \
+  --ipc=host \
+  --gpus=all \
+  -e DISPLAY=$DISPLAY \
+  -e __NV_PRIME_RENDER_OFFLOAD=1 \
+  -e __GLX_VENDOR_LIBRARY_NAME=nvidia \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  -v ${VTRROOT}:${VTRROOT}:rw \
+  -v ${HOME}/.ignition:${HOME}/.ignition:rw \
+  -v ${HOME}/.gz:${HOME}/.gz:rw \
+  -v /dev:/dev \
+  virtr
+
+# cd ${VIRTRWS}
+# rosdep update
+source /opt/ros/humble/setup.bash
+source ${VTRSRC}/main/install/setup.bash
+# rosdep install -r --from-paths src -i -y --rosdistro humble
+colcon build --symlink-install
+
+```
+Once these packages are built you can generate the clearpath robot files required for launching the sim. You can modify robot.yaml to fit your desired clear path robot.
+
+```Bash
+ros2 run clearpath_generator_common generate_bash -s ${CLEARPATHCONFIG}
+```
+Make sure files exist under virtr/data/map_name/ (mesh.obj, mesh.mtl, texture.jpg) files exist in your map directory and run the script below to create a sdf file for the simulation
+
+```Bash
+cd ${VIRTR}
+python3 launch/create_gazebo_sdf.py data/map_name
+```
+
+To run the simulator with this map use
+```Bash
+ros2 launch clearpath_gz simulation.launch.py setup_path:="${CLEARPATHCONFIG}/" world:=${GZ_SIM_RESOURCE_PATH}/map_name/model
+```
+
+While the sim is running and you are ready to run a virtual teach, use the script below. Ctrl-C when you are done teaching.
+```Bash
+ros2 run warthog_gazebo_path_publisher save_path --ros-args -p map:=map_name
+```
+
+To create the submap from this path use the script below
+```Bash
+ros2 run vtr_virtual_teach generate_global_map map_name 0
 ```
 
 ## [License](./LICENSE)
