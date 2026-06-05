@@ -25,37 +25,42 @@ class WarthogRelativeTransformRecorder(Node):
         super().__init__("warthog_relative_transform_recorder")
 
         self.declare_parameter("map", Parameter.Type.STRING)
-        map_param = self.get_parameter("map")
+        self.declare_parameter("model_name", Parameter.Type.STRING)
+        self.declare_parameter("output_filename", "relative_transforms.csv")
+        self.declare_parameter("sampling_interval", 0.2)
+        # self.declare_parameter("tf_topic", "/w200_0066/tf")
+        # self.declare_parameter("parent_frame_id", "parking_world")
+        # self.declare_parameter("child_frame_id", "w200_0066/robot")
 
         # Check map directory exists
+        map_param = self.get_parameter("map")
         if map_param is None or map_param.value == "":
             raise RuntimeError("Required parameter 'map' must be set to a non-empty string")
         virtr = os.environ["VIRTR"]
         map_path = Path(virtr) / "data" / map_param.value
         assert map_path.exists(), f"Map path does not exist: {map_path}"
 
-        self.declare_parameter("output_filename", "relative_transforms.csv")
-        self.declare_parameter("model_name", "w200_0066")
-        self.declare_parameter("sampling_interval", 0.2)
-        # self.declare_parameter("tf_topic", "/w200_0066/tf")
-        # self.declare_parameter("parent_frame_id", "parking_world")
-        # self.declare_parameter("child_frame_id", "w200_0066/robot")
+        # Require a model name
+        model_param = self.get_parameter("model_name")
+        if model_param is None or model_param.value == "":
+            raise RuntimeError("Required parameter 'model_name' must be set to a non-empty string")
+        self.model_name = model_param.value
 
-
-        self.model_name = str(self.get_parameter("model_name").value)
-        self.output_dir = os.path.expanduser(f"{virtr}/data/{self.get_parameter('map').value}/paths")
+        # Set up output file path
+        self.output_dir = os.path.expanduser(map_path / "paths")
+        os.makedirs(self.output_dir, exist_ok=True)
         self.output_filename = self.get_parameter("output_filename").value
-        self.sampling_interval = float(self.get_parameter("sampling_interval").value)
         self.output_file = os.path.join(self.output_dir, self.output_filename)
 
+
+        # Other parameters
+        self.sampling_interval = float(self.get_parameter("sampling_interval").value)
+        self.tf_topic = "/" + self.model_name + "/tf"
+        self.parent_frame_id = map_param.value
+        self.child_frame_id = self.model_name + "/robot"
         # self.tf_topic = str(self.get_parameter("tf_topic").value)
         # self.parent_frame_id = str(self.get_parameter("parent_frame_id").value)
         # self.child_frame_id = str(self.get_parameter("child_frame_id").value)
-        self.tf_topic = "/" + self.model_name + "/tf"
-        self.parent_frame_id = str(self.get_parameter("map").value)
-        self.child_frame_id = self.model_name + "/robot"
-
-        os.makedirs(self.output_dir, exist_ok=True)
 
         self.initial_pose: Optional[np.ndarray] = None
         self.previous_pose: Optional[np.ndarray] = None
