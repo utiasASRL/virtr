@@ -74,6 +74,7 @@ RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade
 RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade \
     ros-humble-ros-gz \
     ros-humble-ign-ros2-control \
+    ros-humble-ros2-controllers \
     && rm -rf /var/lib/apt/lists/*
 # ros-humble-ros-gz-bridge
 # python3-gz-transport13 \
