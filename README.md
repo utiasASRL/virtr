@@ -1,106 +1,150 @@
-## Installation of VirT&R
-VirT&R is a systematic pipeline to make virtual teach maps for VTR3 (https://github.com/utiasASRL/vtr3). Thus, it makes use of several programs and requires VTR3 to use.
+## VirT&R Description
+Virtual Teach & Repeat is a systematic pipeline to make virtual teach maps for VTR3 (https://github.com/utiasASRL/vtr3). Thus, it makes use of several programs and requires VTR3 to use.
 
-IF YOU ALREADY HAVE VTR3 SET UP AND RUNNING CLICK HERE TO GO TO THE NEXT PART AFTER MAKING SURE TO CLONE THIS REPO TO $VTRROOT: [Existing VTR3 Implementation Checkpoint](#virtr)
+This guide assumes that you have already set up and built VTR3. This version of VirTR is independent of any specific VTR3 branch, but it still depends on several VTR3 packages, including, but not limited to, vtr_common, vtr_pose_graph, and vtr_lidar. This dependency is handled by building a Docker container on top of the base VTR3 image, allowing VirTR to reuse VTR3 packages directly while avoiding redundant or diverging local copies.
 
+## Download VirT&R
+This package contains the vtr_virtual_teach C++ package for VTR3 and other custom scripts required to create virtual teach maps. Download it to your local filesystem in ${VTRROOT}.
 
-## Setup VTR3 Directories
-Create the following directories in your local filesystem. Later, they will be mapped to the Docker container. (If you already have VTR3 installed and running on your machine, skip this step.)
-
-```Bash
-export VTRROOT=~/ASRL/vtr3         # (INTERNAL default) root directory
-export VTRSRC=${VTRROOT}/src       # source code (this repo)
-export VTRDATA=${VTRROOT}/data     # datasets
-export VTRTEMP=${VTRROOT}/temp     # default output directory
-export VTRMODELS=${VTRROOT}/models # .pt models for TorchScript
-mkdir -p ${VTRSRC} ${VTRTEMP} ${VTRDEPS}
-```
-
-Reference: https://github.com/utiasASRL/vtr3/wiki/Installation-Guide
-
-## Download VTR3 Source Code
-Clone VTR3 to your local filesystem. (If you already have VTR3 installed and running on your machine, skip this step.)
-
-```Bash
-cd ${VTRSRC}
-git clone git@github.com:utiasASRL/vtr3.git .
-git submodule update --init --remote
-```
-
-## Download virtual_teach_vtr_wrapper
-This package contains the vtr_virtualteach C++ package for VTR3 and the custom scripts required to create virtual teach maps. Download it to your local filesystem in ${VTRROOT}.
-
+Define the following environment variables. These can be added to your ~/.bashrc. Some other environment variables are set within the Docker file.
 ```Bash
 export VIRTR=${VTRROOT}/virtr
 export VIRTRWS=${VIRTR}/ros2
-export CLEARPATHCONFIG=${VIRTR}/clearpath
 ```
 
+Clone this repository **and its submodules** into `VIRTR`:
 ```Bash
 cd ${VTRROOT}
 git clone --recurse-submodules -b ros2_port git@github.com:utiasASRL/virtr.git ${VIRTR}
 ```
 
-## Download vtr3_posegraph_tools
-It is also recommended to download the following project as well (https://github.com/utiasASRL/vtr3_pose_graph), as it contains useful scripts for ensuring the teach maps are made correctly. Scripts in this project are referenced in the 'Using VirT&R' documentation. Download it to your local filesystem in the same directory (${VTRROOT}) alongside vtr_virtual_teach_wrapper if you do not already have it. 
+## Docker Installation
+
+Once VTR3 has been set up, the VirT&R pipeline can be installed. A separate Dockerfile is provided to install additional system dependencies on top of those included in the `vtr3` image.
+
+Note that the run command includes the `__NV_PRIME_RENDER_OFFLOAD` and `__GLX_VENDOR_LIBRARY_NAME` environment variables. These are intended for systems with both an integrated GPU and a dedicated NVIDIA GPU, where Gazebo Ignition and Ogre2 may encounter rendering issues if the NVIDIA GPU is not explicitly selected. You may remove these variables from the command if they do not apply to your system. However, if you experience black or missing textures, setting these environment variables inside the container may resolve the issue.
 
 ```Bash
-cd ${VTRROOT}
-git clone git@github.com:utiasASRL/vtr3_pose_graph.git
-```
-
-## Build VTR3 Docker Image
-This builds an image that has all dependencies installed for VTR3. (If you already have VTR3 installed and running on your machine, skip this step.)
-
-```Bash
-xhost +local:root
-cd ${VTRSRC}
-docker build -t vtr3 \
+cd ${VIRTR}
+docker build -t virtr \
   --build-arg USERID=$(id -u) \
   --build-arg GROUPID=$(id -g) \
   --build-arg USERNAME=$(whoami) \
   --build-arg HOMEDIR=${HOME} .
-```
 
-Reference: https://github.com/utiasASRL/vtr3/wiki/EXPERIMENTAL-Running-VTR3-from-a-Docker-Container
-
-## Start the VTR3 Docker container
-Install Nvidia Docker runtime first (https://nvidia.github.io/nvidia-container-runtime/), then run the Docker container for VTR3. (If you already have VTR3 installed and running on your machine, skip this step.)
-
-```Bash
-docker run -dit --rm --name vtr3 \
+docker run -it --name virtr \
   --privileged \
   --network=host \
-  --gpus all \
+  --ipc=host \
+  --gpus=all \
   -e DISPLAY=$DISPLAY \
+  -e __NV_PRIME_RENDER_OFFLOAD=1 \
+  -e __GLX_VENDOR_LIBRARY_NAME=nvidia \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
-  -v ${HOME}:${HOME}:rw \
-  -v ${HOME}/ASRL:${HOME}/ASRL:rw 
-  vtr3
+  -v ${VTRROOT}:${VTRROOT}:rw \
+  -v ${HOME}/.ignition:${HOME}/.ignition:rw \
+  -v ${HOME}/.gz:${HOME}/.gz:rw \
+  -v /dev:/dev \
+  virtr
 ```
 
-FYI: to start a new terminal with the existing container: 
+
+## Building VirT&R
+Inside the Docker container:
+```Bash
+# Source ROS2 and vtr3 packages
+source /opt/ros/humble/setup.bash
+source ${VTRSRC}/main/install/setup.bash
+
+# Build and install VirT&R packages
+cd ${VIRTRWS}
+colcon build --symlink-install
+
+# You may use the following alias to source ROS2, vtr3, and virtr
+source_virtr
+```
+
+## Robot Setup
+This version of VirT&R uses code from Clearpath Robotics to launch robots and sensors in Gazebo Ignition with bridges to ROS 2 ([clearpath_simulator](https://github.com/utiasASRL/clearpath_simulator/tree/fc29a30b6f93ee4b8652bbbe64b13e9365fde1bb)).
+
+To use a Clearpath robot, modify `${VIRTR}/clearpath/robot.yaml`, or equivilantly `${CLEARPATHCONFIG}/robot.yaml`, to match the desired robot and sensor configuration. Once configured, run the following executable to generate platform-specific launch files. More documentation on how to set up the `robot.yaml` file is available in the ([Clearpath documentation](https://docs.clearpathrobotics.com/docs/ros2humble/ros/config/yaml/overview)).
+```Bash
+ros2 run clearpath_generator_common generate_bash -s ${CLEARPATHCONFIG}
+```
+
+If you are using a custom robot, create a dedicated folder, such as `${VIRTR}/custom_robots/my_robot/`, containing the required configuration, launch, and robot description files. See the `hunter2` platform for reference. These files are primarily used to configure the required Gazebo-ROS2 bridges and allow the Clearpath simulator code to launch the robot into Gazebo as if it were a standard Clearpath robot.
+
+Any custom robot meshes or materials referenced by the `.urdf.xacro` or `.xacro` files must be included under `${VIRTR}/data/robots/my_robot/` and correctly referenced in the robot description files.
+
+The `IGN_GAZEBO_RESOURCE_PATH` and `GZ_SIM_RESOURCE_PATH` environment variables are set to `${VIRTR}/data` in the Dockerfile. This allows `.STL` files to be referenced directly in robot description files, for example:
+
+`filename="model://robots/my_robot/meshes/base_link.STL"`
+
+Future work includes removing the dependency on the Clearpath libraries and replacing it with dedicated simulation code that is more generalizable.
+
+## Map Setup
+Ensure relevent files (`mesh.obj, mesh.mtl, texture.jpg, pointcloud.pcd`) exist under `${VIRTR}/data/map_name/`. To build an `.sdf` file that references this model in Gazebo, run:
+```Bash
+cd ${VIRTR}
+python3 launch/create_gazebo_sdf.py data/map_name
+```
+
+This creates the file `model.sdf` in the same directory. The generated file references the custom mesh and sets up the required simulation parameters.
+
+You may want to modify the friction settings in this file if the robot model interacts poorly or unrealistically with the mesh. These settings are left to the user’s discretion, since robot models and description files may define collision geometry and physics properties differently.
+
+## Example Usage
+
+### Launching the Simulator
+
+To run the simulator with a custom map and the Clearpath robot defined in `${CLEARPATHCONFIG}`, run:
+
+```bash
+ros2 launch clearpath_gz simulation.launch.py setup_path:="${CLEARPATHCONFIG}/" world:=${GZ_SIM_RESOURCE_PATH}/map_name/model generate:=false
+```
+
+The `generate:=false` argument prevents custom launch files from being generated. This argument is set to `true` by default and should be set to `true` at least once when using a Clearpath robot.
+
+If you are using a custom robot, you must also specify the path to the custom launch files:
+
+```bash
+ros2 launch clearpath_gz simulation.launch.py setup_path:="${VIRTR}/custom_robots/hunter2/" generate:=false robot:="hunter2" world:=${GZ_SIM_RESOURCE_PATH}/map_name/model
+```
+
+These commands should start the simulation with the robot loaded into the specified map. If a gamepad or controller is connected to your computer, teleoperating the robot should be straightforward. Controller behavior can also be configured in the launch configuration YAML files located in the same directory and subdirectories of the robot description files.
+
+### Creating a Virtual Teach Path
+
+While the simulator is running, position the robot at the desired starting point. Then run the command below and begin teleoperating the robot along the desired path. Press `Ctrl-C` when you are finished teaching.
+
+```bash
+ros2 run relative_transform_recorder save_path --ros-args -p map:=map_name
+```
+
+This creates the following file:
+
+```text
+${VIRTR}/data/map_name/paths/relative_transforms.csv
+```
+
+### Creating a VTR3 Pose Graph
+
+After saving the relative transforms from the virtual teach, create the pose graph and point cloud submaps used by VTR3 with the following command:
+
+```bash
+ros2 run vtr_virtual_teach generate_global_map map_name 0
+```
+
+The `0` argument specifies that lidar point cloud submaps should be generated rather than radar point cloud submaps. The radar pipeline has not been tested in this version of VirT&R, although the submap generation code has not been substantially modified from the original version.
+
+
+## Download vtr3_posegraph_tools
+It is also recommended to download the following project as well (https://github.com/utiasASRL/vtr3_pose_graph), as it contains useful scripts for ensuring the teach maps are made correctly. Scripts in this project are referenced in the 'Using VirT&R' documentation. Download it to your local filesystem in the same directory (${VTRROOT}) alongside this code if you do not already have it. The `virtual_teach_edits` branch should have relevent scripts specific to VirT&R for visualization.
 
 ```Bash
-docker exec -it vtr3 bash
+cd ${VTRROOT}
+git clone virtual_teach_edits git@github.com:utiasASRL/vtr3_pose_graph.git
 ```
-
-## Build and Install VT&R3
-Start a new terminal and enter the container. (Again, if you have already built VTR3 and have it running, skip this step.)
-
-```Bash
-docker exec -it vtr3 bash
-
-source /opt/ros/humble/setup.bash 
-cd ${VTRSRC}/main
-VTR_PIPELINE=LIDAR colcon build --symlink-install 
-
-VTRUI=${VTRSRC}/main/src/vtr_gui/vtr_gui/vtr-gui
-npm --prefix ${VTRUI} install ${VTRUI}
-npm --prefix ${VTRUI} run build
-```
-
-wait until it finishes.
 
 ## Create a python venv to install the posegraph python tools
 Within the running VTR3 Docker container, create a virtual environment at `${VTRROOT}`. (If you already have these tools installed, skip this step.)
@@ -112,64 +156,10 @@ source venv/bin/activate
 cd vtr3_posegraph_tools
 pip3 install -e .
 ```
-<a id="virtr"></a>
-## Build and Install virtual_teach_vtr_wrapper (this package)
-The vtr_virtualteach package interfaces directly with the VTR3 codebase and must be built used in the vtr3 Docker container, and built with the VTR3 project sourced. 
 
-NOTE: IF YOU ALREADY HAVE VTR3 INSTALLED AND WORKING, THIS IS WHERE YOU NEED TO BEGIN FOLLOWING THESE INSTRUCTIONS.
+# Additional VirT&R Documention
 
-```Bash
-docker exec -it vtr3 bash
-
-source ${VTRSRC}/main/install/setup.bash
-source /opt/ros/humble/setup.bash
-echo $ROS_DISTRO
-
-cd ${VTRROOT}/virtr/
-colcon build --packages-select vtr_virtualteach
-
-source ~/ASRL/vtr3/virtr/install/setup.bash
-
-exit
-```
-
-Note that whenever you change any code in the VTR3 repo, you need to re-compile, do this by re-running the `colcon build ....` command for both VTR3 and then vtr_virtualteach (nd re-source both). Always wait until the build process on VTR3 finishes before running the build command for vtr_virtual_testing.
-
-
-## Build and install the rest of the programs required
-Now that VTR3 has been set up with the VirT&R extension package, the rest of the VirT&R pipeline must be installed. A separate Dockerfile for the other programs was created to simplify the VirT&R pipeline set-up for users with pre-existing VTR3 installations they may not want to edit, rebuild, or abandon. It has been set up to mount the same directories as VTR3 for seamless use to create more of a solidified project and enable more straightforward file storage and transfer. 
-
-Please build and run the VirT&R Dockerfile (outside of the VTR3 Docker container in ${VTRROOT}).
-
-```Bash
-cd ${VTRROOT}/virtual_teach_vtr_wrapper/docker
-docker build -t virtr \
-  --build-arg USERID=$(id -u) \
-  --build-arg GROUPID=$(id -g) \
-  --build-arg USERNAME=$(whoami) \
-  --build-arg HOMEDIR=${HOME} \
-  --build-arg CUDA_ARCH="86" .
-  
-docker run -it --name virtr \
-  --privileged \
-  --network=host \
-  --ipc=host \
-  --gpus=all \
-  -e DISPLAY=$DISPLAY \
-  -v /tmp/.X11-unix:/tmp/.X11-unix \
-  -v ${VTRROOT}:${VTRROOT}:rw \
-  -v ${HOME}/.gazebo:${HOME}/.gazebo:rw \
-  -v /dev:/dev \
-  -v ${VTRROOT}/virtual_teach_vtr_wrapper/catkin_ws:${VTRROOT}/virtual_teach_vtr_wrapper/catkin_ws:rw \
-  -v ${VTRROOT}/virtual_teach_vtr_wrapper/src/nerfstudio:${VTRROOT}/virtual_teach_vtr_wrapper/src/nerfstudio:rw \
-  virtr
-colcon build --symlink-install
-
-```
-
-wait until it finishes (takes around 30 min to build and 20 min to finish the entrypoint.sh upon run time).
-
-Now you should be inside the VirT&R Docker container where Blender, Gazebo, and Nerfstudio are installed. All programs and dependencies should be built, installed, and ready for use. 
+The following instructions are from the README.md from the previous/original VirT&R branch.
 
 ## Please consult the 'Using VirT&R' documentation for detailed steps on how to proceed. 
 https://docs.google.com/document/d/1vdrQSJKqGCwA7cPzZpHC-xvCbrQ00U4pSuBSXlRZtOs/edit?usp=sharing
@@ -209,65 +199,5 @@ chmod +x ImageExtraction.sh ImageProcessor.sh Gazebo.sh TeachMap.sh
 
 ```
 
-
-## EPK UPDATES
-Working updates for new docker file. Note the "__NV_PRIME_RENDER_OFFLOAD" and "__GLX_VENDOR_LIBRARY_NAME" in the run command are specifc to if you experience black textures in the Gazebo mesh and if you have two GPU's on your machine (Intel onboard + Nvidia for example).
-```Bash
-cd ${VIRTR}
-docker build -t virtr \
-  --build-arg USERID=$(id -u) \
-  --build-arg GROUPID=$(id -g) \
-  --build-arg USERNAME=$(whoami) \
-  --build-arg HOMEDIR=${HOME} .
-
-docker run -it --name virtr \
-  --privileged \
-  --network=host \
-  --ipc=host \
-  --gpus=all \
-  -e DISPLAY=$DISPLAY \
-  -e __NV_PRIME_RENDER_OFFLOAD=1 \
-  -e __GLX_VENDOR_LIBRARY_NAME=nvidia \
-  -v /tmp/.X11-unix:/tmp/.X11-unix \
-  -v ${VTRROOT}:${VTRROOT}:rw \
-  -v ${HOME}/.ignition:${HOME}/.ignition:rw \
-  -v ${HOME}/.gz:${HOME}/.gz:rw \
-  -v /dev:/dev \
-  virtr
-
-# cd ${VIRTRWS}
-# rosdep update
-source /opt/ros/humble/setup.bash
-source ${VTRSRC}/main/install/setup.bash
-# rosdep install -r --from-paths src -i -y --rosdistro humble
-colcon build --symlink-install
-
-```
-Once these packages are built you can generate the clearpath robot files required for launching the sim. You can modify robot.yaml to fit your desired clear path robot.
-
-```Bash
-ros2 run clearpath_generator_common generate_bash -s ${CLEARPATHCONFIG}
-```
-Make sure files exist under virtr/data/map_name/ (mesh.obj, mesh.mtl, texture.jpg) files exist in your map directory and run the script below to create a sdf file for the simulation
-
-```Bash
-cd ${VIRTR}
-python3 launch/create_gazebo_sdf.py data/map_name
-```
-
-To run the simulator with this map use
-```Bash
-ros2 launch clearpath_gz simulation.launch.py setup_path:="${CLEARPATHCONFIG}/" world:=${GZ_SIM_RESOURCE_PATH}/map_name/model
-```
-
-While the sim is running and you are ready to run a virtual teach, use the script below. Ctrl-C when you are done teaching.
-```Bash
-ros2 run warthog_gazebo_path_publisher save_path --ros-args -p map:=map_name
-```
-
-To create the submap from this path use the script below
-```Bash
-ros2 run vtr_virtual_teach generate_global_map map_name 0
-```
 
 ## [License](./LICENSE)

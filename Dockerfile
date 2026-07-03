@@ -5,7 +5,7 @@ ARG USERID=0
 ARG USERNAME=root
 ARG HOMEDIR=/root
 
-# Test consistency with vtr3 image
+# Test consistency with vtr3 image.
 RUN test -d "${HOMEDIR}" && \
     id "${USERNAME}" && \
     test "$(id -u ${USERNAME})" = "${USERID}" && \
@@ -14,7 +14,7 @@ RUN test -d "${HOMEDIR}" && \
 # Set non-interactive mode.
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Test consistency with vtr3 image
+# Test consistency with vtr3 image.
 RUN test "$VTRROOT" = "${HOMEDIR}/ASRL/vtr3"
 RUN test "$VTRSRC" = "$VTRROOT/src" && \
     test "$VTRDATA" = "$VTRROOT/data" && \
@@ -34,7 +34,7 @@ ENV GZ_SIM_RESOURCE_PATH=${VIRTR}/data
 RUN echo "alias source_virtr='source /opt/ros/humble/setup.bash; source ${VTRSRC}/main/install/setup.bash; source ${VIRTRWS}/install/setup.bash'" >> ${HOMEDIR}/.bashrc
 RUN echo "alias build_virtr='source /opt/ros/humble/setup.bash && cd ${VTRSRC}/main && colcon build --symlink-install && source ${VTRSRC}/main/install/setup.bash && cd ${VIRTRWS} && colcon build --symlink-install'" >> ${HOMEDIR}/.bashrc
 
-# Switch to root to install dependencies
+# Switch to root to install dependencies.
 USER 0:0
 
 # vtr3 should have these, but double check and install if missing.
@@ -70,7 +70,7 @@ RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade
     && rm -rf /var/lib/apt/lists/*
 # ros-humble-clearpath-desktop
 
-# Install Gazebo Fortress ROS2 dependencies (These could maybe be removed).
+# Install Gazebo Fortress ROS2 dependencies. Some of these could maybe be removed.
 RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade \
     ros-humble-ros-gz \
     ros-humble-ign-ros2-control \
@@ -86,15 +86,14 @@ RUN apt-get update && apt-get install -q -y --no-install-recommends --no-upgrade
     ros-humble-teleop-twist-joy \
     && rm -rf /var/lib/apt/lists/*
    
-# Original VirTR packages
+# Original VirTR packages.
 # RUN pip install --upgrade pip setuptools
 # RUN pip install "jupyter_client>=5.3.4,<8"
 # RUN pip install --upgrade numpy
 # RUN pip install --ignore-installed scipy pandas matplotlib opencv-python testresources open3d asrl-pylgmath pycollada plotly opencv-python
 # RUN pip install --ignore-installed --upgrade numpy pip pyOpenSSL cryptography
 
-# Python packages specific to VirTR.
-# Preinstall some packages to avoid open3d overwriting numpy version
+# Python packages specific to VirTR and preinstall some packages to avoid open3d overwriting numpy version
 RUN apt update && apt install -q -y --no-install-recommends --no-upgrade \
     python3-jupyter-client \
     python3-numpy \
@@ -108,23 +107,7 @@ RUN apt update && apt install -q -y --no-install-recommends --no-upgrade \
     python3-openssl \
     python3-cryptography \
     && rm -rf /var/lib/apt/lists/*
-
 RUN pip install --no-cache-dir open3d asrl-pylgmath 
-
-# RUN python3 -m pip install --no-cache-dir \
-#     "jupyter_client>=5.3.4,<8" \
-#     numpy \
-#     scipy \
-#     pandas \
-#     matplotlib \
-#     opencv-python \
-#     testresources \
-#     open3d \
-#     asrl-pylgmath \
-#     pycollada \
-#     plotly \
-#     pyOpenSSL \
-#     cryptography
 
 # Blender could actually be removed - you can run Gazebo with .obj/.mtl files directly instead of .dae
 RUN python3 -m pip install --no-cache-dir \
@@ -136,6 +119,6 @@ USER ${USERID}:${GROUPID}
 WORKDIR ${VIRTRWS}
 
 # Might require this
-# RUN chmod +x ${VIRTRWS}/src/warthog_gazebo_path_publisher/warthog_gazebo_path_publisher/save_path.py
+# RUN chmod +x ${VIRTRWS}/src/relative_transform_recorder/relative_transform_recorder/save_path.py
 
 CMD ["/bin/bash", "-l"]
