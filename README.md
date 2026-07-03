@@ -26,6 +26,7 @@ Note that the run command includes the `__NV_PRIME_RENDER_OFFLOAD` and `__GLX_VE
 
 ```Bash
 cd ${VIRTR}
+
 docker build -t virtr \
   --build-arg USERID=$(id -u) \
   --build-arg GROUPID=$(id -g) \
@@ -118,7 +119,7 @@ These commands should start the simulation with the robot loaded into the specif
 While the simulator is running, position the robot at the desired starting point. Then run the command below and begin teleoperating the robot along the desired path. Press `Ctrl-C` when you are finished teaching.
 
 ```bash
-ros2 run relative_transform_recorder save_path --ros-args -p map:=map_name
+ros2 run relative_transform_recorder save_path --ros-args -p map:=map_name -p model_name:=hunter2
 ```
 
 This creates the following file:
