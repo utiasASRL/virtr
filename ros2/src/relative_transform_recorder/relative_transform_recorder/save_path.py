@@ -19,7 +19,7 @@ from scipy.spatial.transform import Rotation as R
 from tf2_msgs.msg import TFMessage
 
 class RelativeTransformRecorder(Node):
-    """Subscribe to Gazebo ModelStates and save relative transforms."""
+    """Subscribe to Gazebo ModelStates bridged to ROS2 and save relative transforms."""
 
     def __init__(self) -> None:
         super().__init__("relative_transform_recorder")
