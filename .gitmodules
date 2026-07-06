@@ -1,0 +1,4 @@
+[submodule "ros2/src/clearpath_simulator"]
+	path = ros2/src/clearpath_simulator
+	url = git@github.com:utiasASRL/clearpath_simulator.git
+	branch = humble

@@ -1,0 +1,30 @@
+session_name: generate_global_map
+
+environment:
+  # ROS_DOMAIN_ID: "7"
+  # ROS_DISCOVERY_SERVER: "192.168.131.1:11811;localhost:11811"
+  MAP_NAME: "parking"
+  MAP_MODE: "0" # Lidar 0, Radar 1
+
+start_directory: ${VIRTRWS}
+suppress_history: false
+
+windows:
+  - window_name: global_map
+    layout: main-horizontal
+    shell_command_before:
+      - source ${VTRSRC}/main/install/setup.bash
+      - source ${VIRTRWS}/install/setup.bash
+    panes:
+      - >
+        ros2 run vtr_virtual_teach generate_global_map ${MAP_NAME} ${MAP_MODE}
+        --ros-args
+        --params-file ${VIRTR}/config/warthog_lidar.yaml
+
+
+        #  ros2 launch vtr_navigation vtr.launch.py
+        # base_params:=ouster_warthog_default.yaml
+        # start_new_graph:=false
+        # use_sim_time:=false
+        # planner:="unicycle_mpc"
+        # model_dir:=${VTRROOT}/models

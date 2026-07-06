@@ -1,0 +1,296 @@
+#Add aa new comment to reload
+# serial_number: w200-0066
+# version: 0
+# system:
+#   hosts:
+#     - hostname: cpr-w200-0066
+#       ip: 192.168.131.1
+#     - hostname: vtr-laptop
+#       ip: 192.168.131.100
+#   ros2:
+#     namespace: w200_0066
+#     domain_id: 7
+#     middleware:
+#       discovery: server
+# #      profile: /etc/clearpath/warthog_dds.xml
+#       servers:
+#         - hostname: cpr-w200-0066
+#         - hostname: vtr-laptop
+#     workspaces:
+#       - "/home/jack/warthog_onboard/ros2_ws/install/setup.bash"
+# platform:
+#   extras:
+#     urdf:
+#       package: tor70_description
+#       path: urdf/warthog_description.urdf.xacro
+#     launch:
+#       package: tor70_bringup
+#       path: launch/warthog_combined.launch
+
+serial_number: w200-0066
+version: 0
+system:
+  hosts:
+    - hostname: cpr-w200-0066
+      ip: 192.168.131.1
+  ros2:
+    namespace: w200_0066
+    workspaces: ["${VIRTRWS}/install/setup.bash"]
+links:
+  box:
+    - name: structure
+      size: [0.5, 0.675, .5]
+    - name: tower
+      size: [0.15, 0.15, 0.5]
+      parent: structure_link
+      xyz: [0.0, 0.0, 0.5]
+  frame:
+    - name: top_tower
+      parent: tower_link
+      xyz: [0.0, 0.0, 0.25]
+mounts:
+  disk:
+    - parent: post_0_mount
+  post:
+    - model: dual
+      parent: top_tower_link
+      xyz: [0.0, 0.0, 0.5]
+      spacing: 0.12
+sensors:
+  camera:
+    - model: intel_realsense
+      urdf_enabled: true
+      launch_enabled: true
+      parent: disk_0_mount
+      xyz: [0.0, 0.0, 0.0]
+      rpy: [0.0, 0.0, 0.0]
+      ros_parameters:
+        intel_realsense:
+          camera_name: camera_0
+          device_type: d435
+          serial_no: '0'
+          enable_color: true
+          rgb_camera.profile: 640,480,30
+          enable_depth: true
+          depth_module.profile: 640,480,30
+          pointcloud.enable: true
+  gps: 
+      - model: novatel_smart6
+        urdf_enabled: true
+        launch_enabled: true
+        parent: disk_0_mount
+        xyz: [0.0, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
+        ros_parameters:
+          nmea_navsat_driver:
+            frame_id: gps_0_link
+            port: "/dev/clearpath/gps"
+            baud: 115200
+  imu: []
+
+  lidar3d:
+  # - model: velodyne_lidar
+  #   urdf_enabled: true
+  #   launch_enabled: true
+  #   parent: disk_0_mount
+  #   xyz: [0.0, 0.0, 0.0]
+  #   rpy: [0.0, 0.0, 0.0]
+  #   ros_parameters:
+  #     velodyne_driver_node:
+  #       frame_id: lidar3d_0_laser
+  #       device_ip: 192.168.131.20
+  #       port: 2368
+  #       model: VLP16
+  #     velodyne_transform_node:
+  #       model: VLP16
+  #       fixed_frame: lidar3d_0_laser
+  #       target_frame: lidar3d_0_laser
+
+  - model: ouster_os1
+    urdf_enabled: true
+    launch_enabled: true
+    parent: disk_0_mount
+    xyz: [0.0, 0.0, 0.0]
+    rpy: [0.0, 0.0, 0.0]
+    ros_parameters:
+      ouster_driver:
+        sensor_hostname: 192.168.131.20
+        udp_dest: 192.168.131.100
+        lidar_port: 7502
+        imu_port: 7503
+        # proc_mask: IMU|PCL|SCAN|IMG|RAW|TLM
+        proc_mask: IMG|PCL|IMU
+        use_system_default_qos: false
+
+platform:
+  # controller: ps4
+  extras:
+    ros_parameters:
+      teleop_twist_joy_node:
+        enable_button: 4
+        enable_turbo_button: 5
+        axis_linear.x: 1
+        axis_angular.yaw: 3
+        scale_linear.x: 1.0
+        scale_linear_turbo.x: 4.0
+        scale_angular.yaw: 2.0
+        scale_angular_turbo.yaw: 3.0
+      joy_node:
+        dev: /dev/input/js0
+
+# w200_0066:
+#   joy_teleop/teleop_twist_joy_node:
+#     ros__parameters:
+#       use_sim_time: True
+#       axis_linear.x: 1
+#       scale_linear.x: 0.5
+#       scale_linear_turbo.x: 1.0
+#       axis_angular.yaw: 0
+#       scale_angular.yaw: 2.4
+#       scale_angular_turbo.yaw: 2.4
+#       enable_button: 4
+#       enable_turbo_button: 5
+#   joy_teleop/joy_node:
+#     ros__parameters:
+#       use_sim_time: True
+#       deadzone: 0.1
+#       autorepeat_rate: 20.0
+#       dev: '/dev/input/ps4'
+
+
+  # extras:
+  #   ros_parameters:
+  #     teleop_twist_joy_node:
+  #       axis_linear.x: 4
+  #       axis_angular.yaw: 3
+  #       enable_button: 5
+  #       enable_turbo_button: 4
+
+# serial_number: a200-0000
+# version: 0
+# system:
+#   username: administrator
+#   hosts:
+#     - hostname: cpr-a200-0000
+#       ip: 192.168.131.1
+#   ros2:
+#     namespace: a200_0000
+#     domain_id: 0
+#     middleware:
+#       implementation: rmw_fastrtps_cpp
+#     workspaces: []
+# platform:
+#   controller: ps4
+#   battery:
+#     model: ES20_12C
+#     configuration: S2P1
+#   attachments:
+#     - name: front_bumper
+#       type: a200.bumper
+#       model: default
+#       parent: front_bumper_mount
+#       xyz: [0.0, 0.0, 0.0]
+#       rpy: [0.0, 0.0, 0.0]
+#       enabled: true
+#       extension: 0.0
+#     - name: rear_bumper
+#       type: a200.bumper
+#       model: default
+#       parent: rear_bumper_mount
+#       xyz: [0.0, 0.0, 0.0]
+#       rpy: [0.0, 0.0, 0.0]
+#       enabled: true
+#       extension: 0.0
+#     - name: top_plate
+#       type: a200.top_plate
+#       model: pacs
+#       parent: default_mount
+#       xyz: [0.0, 0.0, 0.0]
+#       rpy: [0.0, 0.0, 0.0]
+#       enabled: true
+#     - name: sensor_arch
+#       type: a200.sensor_arch
+#       model: sensor_arch_300
+#       parent: default_mount
+#       xyz: [0.0, 0.0, 0.0]
+#       rpy: [0.0, 0.0, 0.0]
+#       enabled: true
+#   extras:
+#     urdf: {}
+# links:
+#   box:
+#     - name: user_bay_cover
+#       parent: top_plate_link
+#       xyz: [0.0, 0.0, 0.00735]
+#       rpy: [0.0, 0.0, 0.0]
+#       size: [0.4, 0.4, 0.002]
+#   cylinder: []
+#   frame: []
+#   mesh: []
+#   sphere: []
+# mounts:
+#   bracket:
+#     - parent: top_plate_mount_d1
+#       xyz: [0.0, 0.0, 0.0]
+#       rpy: [0.0, 0.0, 0.0]
+#       model: horizontal
+#   fath_pivot:
+#     - parent: sensor_arch_mount
+#       xyz: [0.0, 0.0, -0.021]
+#       rpy: [3.1415, 0.0, 0.0]
+#       angle: 0.0
+#   riser: []
+#   sick: []
+#   post: []
+#   disk: []
+# sensors:
+#   camera:
+#     - model: intel_realsense
+#       urdf_enabled: true
+#       launch_enabled: true
+#       parent: fath_pivot_0_mount
+#       xyz: [0.0, 0.0, 0.0]
+#       rpy: [0.0, 0.0, 0.0]
+#       ros_parameters:
+#         intel_realsense:
+#           camera_name: camera_0
+#           device_type: d435
+#           serial_no: '0'
+#           enable_color: true
+#           rgb_camera.profile: 640,480,30
+#           enable_depth: true
+#           depth_module.profile: 640,480,30
+#           pointcloud.enable: true
+#   gps: []
+#   imu: []
+#   lidar2d:
+#     - model: hokuyo_ust
+#       urdf_enabled: true
+#       launch_enabled: true
+#       parent: bracket_0_mount
+#       xyz: [0.0, 0.0, 0.0]
+#       rpy: [0.0, 0.0, 0.0]
+#       ros_parameters:
+#         urg_node:
+#           laser_frame_id: lidar2d_0_laser
+#           ip_address: 192.168.131.20
+#           ip_port: 10940
+#           angle_min: -2.356
+#           angle_max: 2.356
+#   lidar3d:
+#     - model: velodyne_lidar
+#       urdf_enabled: true
+#       launch_enabled: true
+#       parent: sensor_arch_mount
+#       xyz: [0.0, 0.0, 0.0]
+#       rpy: [0.0, 0.0, 0.0]
+#       ros_parameters:
+#         velodyne_driver_node:
+#           frame_id: lidar3d_0_laser
+#           device_ip: 192.168.131.25
+#           port: 2368
+#           model: VLP16
+#         velodyne_transform_node:
+#           model: VLP16
+#           fixed_frame: lidar3d_0_laser
+#           target_frame: lidar3d_0_laser
