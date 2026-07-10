@@ -128,6 +128,19 @@ This creates the following file:
 ${VIRTR}/data/map_name/paths/relative_transforms.csv
 ```
 
+To additionally save the path in georeferenced coordinates, enable the `save_georeferenced_transforms` flag:
+
+```bash
+ros2 run relative_transform_recorder save_path --ros-args -p map:=map_name -p model_name:=hunter2 -p save_georeferenced_transforms:=true
+```
+
+When this option is enabled, the user must include an offset file (`offset.xyz` or `offset.txt`) under the same map directory `${VIRTR}/data/map_name/` with the rest of the world files. 
+
+The recorder will additionally create the following file:
+```text
+${VIRTR}/data/map_name/paths/georeferenced_transforms.csv
+```
+
 ### Creating a VTR3 Pose Graph
 
 After saving the relative transforms from the virtual teach, create the pose graph and point cloud submaps used by VTR3 with the following command:
